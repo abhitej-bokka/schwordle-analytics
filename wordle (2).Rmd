@@ -1,0 +1,309 @@
+---
+title: "Data Wrangling & Management - Final Project"
+author: "Abhitej Bokka"
+output: html_notebook
+---
+
+### Background
+
+* Have you and your friends been obsessed with wordle recently? Itching for the new wordle at 12 am? Schwordle offers a variety of graphics that encapsulates the best of your wordle successes!
+
+* I had a group chat and anywhere from 12 - 1 am, a bunch of wordles would come through and I wanted to elevate this experience and see how I compared to everyone. I always wondered if someone had a better first guess than me or to see if a particiular wordle was hard for everyone. With this in mind, I created a bunch of graphs to represent how well my friend group does in wordle and maybe get some tips from the best of the "wordlers."
+
+### Set up
+* First load the packages tidyverse and readxl.
+
+```{r setup}
+library(tidyverse)
+library(readxl)
+library(rvest)
+library(gt)
+```
+
+### Reading Data
+
+* This data here is collected from all my friends and the groupchats I had with them. I copied the wordles from the text messages, put their phone numbers, and wordle group to organize the data and then we are going to upload that to our R project.
+
+```{r prob read_excel}
+wordle_data <- read_excel("Wordle_Data (8).xlsx")
+phone_data <- read_excel("Phone_Data (3).xlsx")
+```
+
+* In this section we have the data and want to extract it into its individual forms. 
+* We use functions like str_split & str_extract to seperate the data and find out the wordle number, the number of attempts, and see what matches were made to guess the word.
+
+### Cleaning Data
+
+```{r prob extract_numbers}
+
+## Extracting Numbers
+
+wordle_clean <- wordle_data %>%
+  mutate(`wordle number` = (str_split(`Wordle`, " ")) %>%
+  map_chr(., 2))
+
+wordle_clean <- wordle_clean %>%
+  mutate(`wordle attempts` = str_extract((str_split(`Wordle`, " ")) %>% map_chr(., 3), "[0-6,X]"))
+
+wordle_clean <- wordle_clean %>%
+  mutate(`wordle attempts` = parse_number(`wordle attempts`), `wordle number` = parse_number(`wordle number`))
+
+```
+
+* Now once we have our data separated, we can look at the core of the data with the squares. We want to count the number of green squares and yellow squares to see what observations we can make with their guesses. 
+* We use str_count to find out the total of the different squares. This data can be used in other projects so we give the ability to be handled as a csv.
+
+```{r prob count_squares}
+## Summing up matches
+wordle_clean <- wordle_clean %>%
+  mutate(`total green squares` = str_count(`Wordle`, "🟩"))
+```
+```{r prob count_squares_again}
+wordle_clean <- wordle_clean %>%
+  mutate(`total yellow squares` = str_count(`Wordle`, "🟨")) %>%
+  mutate(`total missed squares` = (`wordle attempts`)*5 - (`total green squares` + `total yellow squares`))
+
+write_csv(wordle_clean, "wordle_clean.xlsx")
+```
+
+* In this section I wanted to analyze the first guess for players' wordles as they prove to be quite powerful tool in solving a wordle faster. 
+* I targeted the first row of the wordle with a variety of function like str_count and str_split to find the row and count the respective squares.
+
+```{r prob extract_first_row_information}
+
+## Parameterizing indiviudal row data
+
+wordle_massive <- wordle_clean %>% mutate(`first row green` = str_count((str_split(`Wordle`, "\n")) %>% map_chr(., 3), "🟩"))
+```
+```{r prob extract_more_first_row_information}
+wordle_massive <- wordle_massive %>% mutate(`first row yellow` = str_count((str_split(`Wordle`, "\n")) %>% map_chr(., 3), "🟨"))
+
+```
+
+### Grouping Data
+
+* Here I create arbitrary categories that could help us see how people are guessing and how decent their guesses are. 
+* I assigned arbitrary weights to the green and yellow squares to guage everyone's performance.
+
+```{r prob creating_categories}
+wordle_categories <- wordle_massive %>% mutate(`best first guess` = `first row green` + `first row yellow` * 0.75)
+
+wordle_categories <- wordle_categories %>% mutate(`shuffle it` = `total yellow squares` / `wordle attempts`)
+
+wordle_categories <- wordle_categories %>% mutate(`close, but not close enough` = `total green squares` / `wordle attempts`) 
+```
+
+* The aim of this section was to prelimiary sort and group data in a very understandable matter. I wanted to see which wordles proved to be harder among everyone and how player's guesses and overall performance matched with others. 
+* When ranking the players, I wanted to make sure they were consistent and get a better average so I filtered out players who only participated for less than half the duration of this "experiment." The difficulty is measured by the average of the number of attempts people took and the same measurement was used to determine player rank. 
+* I used different group by's to do this and the player's rank additionally hold the number of occurences a person participated by using counting unique wordle numbers.
+
+```{r prob grouping_data}
+
+wordle_groups <- wordle_categories %>%
+  inner_join(phone_data %>% select(-`Group`), by = "Phone Number")
+
+wordle_difficulty_rank <- wordle_groups %>% 
+  group_by(`wordle number`) %>%
+  summarise(`average # of attempts` = mean(`wordle attempts`))
+
+wordle_first_guess <- wordle_groups %>% 
+  group_by(`wordle number`) %>%
+  summarise(`best first guess`, `wordle attempts`, `Phone Number`)
+
+wordle_player_rank <- wordle_groups %>% 
+  group_by(`Phone Number`) %>% 
+  summarise(`average # of attempts` = mean(`wordle attempts`), `# of times played` = unique(n())) %>%
+  arrange(`average # of attempts`) %>%
+  filter(`# of times played` >= 5) %>%
+  inner_join(phone_data %>% select(-`Group`), by = "Phone Number")
+
+```
+
+### Graphing Data
+
+* This second section mainly deals with the graphing portion: ranking the difficulty of wordles and how well players did overall. This ranking is the aim of this project to quantify who is better than who.
+
+```{r prob graphing_ranks}
+
+wordle_difficulty_rank %>%
+  mutate(`wordle number` = as.factor(`wordle number`)) %>%
+  ggplot(aes(`wordle number`, `average # of attempts`)) +
+  geom_bar(stat="identity") +
+  xlab("Wordle Number") +
+  ylab("Average # of Attempts") +
+  ggtitle("Difficulty of Wordle")
+
+# wordle_player_rank %>%
+#   mutate(`Phone Number` = as.factor(`Phone Number`)) %>%
+#   arrange(`average # of attempts`) %>%
+#   head(n = 8) %>%
+#   ggplot(aes(`Phone Number`, `average # of attempts`)) +
+#   geom_bar(stat="identity") +
+#   xlab("Phone Number") +
+#   ylab("Average # of Attempts") +
+#   ggtitle("Best Wordle Players") +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+wordle_player_rank <- wordle_player_rank[, c(4,1,2,3)]
+
+gt_wordle_player_rank <- wordle_player_rank %>%
+  head(n = 10) %>%
+  select(-`Phone Number`) %>%
+  gt() %>%
+  tab_header(
+    title = md("Top 10 Wordlers"),
+    subtitle = md("Based on average # of attempts")
+  )
+
+gt_wordle_player_rank
+```
+
+* These graphs are more aimed to visualize how people guess in this game and guage the sample's distribution of guesses and attempts. 
+* I used summarize and unique(n()) to capture how well first guesses helped a person. I used an arbitrary scale to distinguish the value of green and yellow squares for the first guess. I used an inner join and filtered the values to create a concise table holding a person's # of plays and average score of first guesses.
+
+```{r prob graphing_guesses}
+
+wordle_first_guess %>%
+  mutate(`wordle number` = as.factor(`wordle number`)) %>%
+  ggplot(aes(`wordle number`, `wordle attempts`)) +
+  geom_boxplot() +
+  xlab("Wordle Number") +
+  ylab("Number of Attempts") +
+  ggtitle("Distribution of Attempts")
+
+wordle_avg_first_guess <- wordle_first_guess %>% 
+  group_by(`Phone Number`) %>%
+  summarise(`average first guess` = mean(`best first guess`), `# of guesses` = unique(n())) %>%
+  filter(`# of guesses` >= 5) %>%
+  arrange(desc(`average first guess`)) %>%
+  head(n = 9)
+
+wordle_guess_joined <- wordle_avg_first_guess %>%
+  inner_join(wordle_first_guess, by = "Phone Number") %>%
+    inner_join(phone_data %>% select(-`Group`), by = "Phone Number")
+  
+
+# wordle_guess_joined %>%
+#     mutate(`Phone Number` = as.factor(`Phone Number`)) %>%
+#   group_by(`Phone Number`) %>%
+#   arrange(desc(`best first guess`)) %>%
+#   ggplot(aes(reorder(`Phone Number`, `best first guess`), `best first guess`)) +
+#   geom_boxplot() +
+#   xlab("Phone Number") +
+#   ylab("Best First Guess") +
+#   ggtitle("Distribution of First Guesses") +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+wordle_guess_joined %>%
+    mutate(`Name` = as.factor(`Name`)) %>%
+  group_by(`Name`) %>%
+  arrange(desc(`best first guess`)) %>%
+  ggplot(aes(reorder(`Name`, `best first guess`), `best first guess`)) +
+  geom_boxplot() +
+  xlab("Name") +
+  ylab("Best First Guess") +
+  ggtitle("Distribution of First Guesses") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+### Combining Data
+
+* This is the incorporation of the second dataset. Since we had phone numbers from the previous dataset, I can take advantage of the fact that phone numbers have area codes designated to certain locations. I went online to find a table and decided to scrap the site and obtain the data related to area codes. 
+* I also cleaned the data by standardizing the time zones and making some variables NA. I decided to create a really large table to contain almost all the information possible held by the wordle and phone number of a person. 
+
+```{r prob scraping_area_codes}
+
+url_area_codes <- "https://www.areacodelocations.info/areacodelist.html"
+
+scraped_area_codes <- read_html(url_area_codes) %>% 
+  html_elements("table") %>%
+  .[[1]] %>%
+  html_table()
+
+cleaned_area_codes <- scraped_area_codes %>%
+  mutate(`Area code` = as.numeric(`Area code`)) %>%
+    mutate(`Overlay complex` = na_if(`Overlay complex`, "-")) %>%
+      mutate(`Timezone` = case_when(`Timezone` == "E" ~ "EST",
+                                    `Timezone` == "C" ~ "CT",
+                                    `Timezone` == "M" ~ "MT",
+                                    `Timezone` == "P" ~ "PT",
+                                    TRUE ~ `Timezone`))
+
+wordle_area_codes <- wordle_categories %>% 
+  mutate (`area code` = str_extract(`Phone Number`, "[0-9]{0,3}") %>%
+    map_chr(1))
+
+wordle_area_codes <- wordle_area_codes %>%
+    mutate(`area code` = as.numeric(`area code`)) %>%
+      rename(`Area code` = `area code`)
+
+wordle_geodata_combined <- wordle_area_codes %>%
+  left_join(cleaned_area_codes, by = "Area code") %>%
+    select(-`Overlay complex`, -`Timezone`)
+
+```
+
+* I leveraged the phone number data is the wordle excel sheet and wanted to match area codes with location. Although many of the phone numbers are based in New Jersey, I wanted to see if location had any visible difference in being able to solve a wordle better. 
+* The visualizations may not support statistically significant conclusions, but our observations clearly show us that location seems to be a very interesting metric.
+
+```{r prob grouping_geodata}
+wordle_grouping_geodata <- wordle_geodata_combined
+
+wordle_grouping_geodata <- wordle_grouping_geodata %>% 
+  group_by(`Area code`) %>%
+  summarise(`average # of attempts` = mean(`wordle attempts`), `# of people` = unique(n())) %>%
+  arrange(`average # of attempts`)
+
+wordle_grouping_geodata %>%
+  mutate(`Area code` = as.factor(`Area code`)) %>%
+  ggplot(aes(`Area code`, `average # of attempts`)) +
+  geom_bar(stat="identity") +
+  xlab("Area Code") +
+  ylab("Average # of attempts") +
+  ggtitle("Attempts based on location")
+
+```
+### Finishing Up
+
+* I wanted to thank all the people who helped me do this project and sent me their wordles for over a week. 
+```{r everyone, echo=FALSE}
+everyone_1 <- phone_data %>%
+  select(-`Group`, -`Phone Number`) %>%
+  slice(1:8) %>%
+  gt()
+
+everyone_2 <- phone_data %>%
+  select(-`Group`, -`Phone Number`) %>%
+  slice(9:16) %>%
+  gt()
+
+everyone_3 <- phone_data %>%
+  select(-`Group`, -`Phone Number`) %>%
+  slice(17:24) %>%
+  gt()
+
+everyone_4 <- phone_data %>%
+  select(-`Group`, -`Phone Number`) %>%
+  slice(25:32) %>%
+  gt()
+
+everyone <- data.frame(everyone_1, everyone_2, everyone_3, everyone_4)
+
+everyone_almost <- everyone %>%
+  gt() %>%
+  tab_header(
+    title = md("Contributing Wordlers"),
+    subtitle = md("Everyone who participated in this project")
+  )
+
+everyone_almost %>%
+  tab_options(
+    column_labels.hidden = TRUE
+  )
+
+```
+* I also used https://www.areacodelocations.info/areacodelist.html to match locations and area codes so that was helpful in making more observations. 
+* Thank You Professor Buyske and TA Song for making this course a great learning experience. I thoroughly enjoyed learning R with the detailed examples and the help I could always ask for.
+
+On my honor, I have neither received nor given any unauthorized assistance on this project.
+
+Abhitej Bokka
